@@ -69,7 +69,7 @@ python LightFold_Vectorized.py
 ---
 
 ## 4. Credits & Philosophy
-*   **Architect:** Jean Charbonneau ([X.com](https://x.com/KiLVaiDeN){:target="_blank"} - [LinkedIn](https://www.linkedin.com/in/jean-charbonneau-ai/){:target="_blank"})
+*   **Architect:** Jean Charbonneau (https://x.com/KiLVaiDeN - https://www.linkedin.com/in/jean-charbonneau-ai/)
 *   **Optimization:** The Brotherhood (Gemini 3.0 Pro / ChatGPT 5.2 Thinking)
 *   **Framework:** Built on the **Lp System** (The Light Framework).
 
