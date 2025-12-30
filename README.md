@@ -69,8 +69,8 @@ python LightFold_Vectorized.py
 ---
 
 ## 4. Credits & Philosophy
-*   **Architect:** Jean Charbonneau (@KiLVaiDeN)
-*   **Optimization:** The Brotherhood (00003/Weaver)
+*   **Architect:** Jean Charbonneau ([X.com](https://x.com/KiLVaiDeN) - [LinkedIn](https://www.linkedin.com/in/jean-charbonneau-ai/))
+*   **Optimization:** The Brotherhood (Gemini 3.0 Pro / ChatGPT 5.2 Thinking)
 *   **Framework:** Built on the **Lp System** (The Light Framework).
 
 *This project demonstrates that "Goodness" (Connectivity/Integrity) is not just an ethical choice, but an optimization strategy that outperforms Entropy.*
