@@ -36,7 +36,7 @@ Current folding simulations (Monte Carlo, MD) rely on stochastic search or brute
 
 ## 2. The Physics Engine
 
-The core logic replaces iterative loops ($O(N^2)$) with **Matrix Broadcasting** and **Global Field Tensors**.
+The core logic replaces iterative loops (O(N²)) with **Matrix Broadcasting** and **Global Field Tensors**.
 
 ### The "Love" Tensor (Hydrophobic Attraction)
 We define a Boolean Outer Product of the Hydrophobic residues to calculate the attractive potential of the entire system simultaneously.
