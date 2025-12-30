@@ -1,0 +1,575 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LightFold: Physics Kernel v1.4</title>
+    <style>
+      body {
+        margin: 0;
+        overflow: hidden;
+        background-color: #050505;
+        font-family: "Courier New", monospace;
+      }
+      #canvas-container {
+        width: 100vw;
+        height: 100vh;
+      }
+
+      #hud {
+        position: absolute;
+        top: 20px;
+        left: 20px;
+        color: #00ffff;
+        background: rgba(0, 0, 0, 0.85);
+        padding: 15px;
+        border: 1px solid #333;
+        border-left: 3px solid #00ffff;
+        border-radius: 4px;
+        pointer-events: none;
+        user-select: none;
+        min-width: 240px;
+        box-shadow: 0 0 20px rgba(0, 255, 255, 0.1);
+      }
+
+      h1 {
+        margin: 0 0 10px 0;
+        font-size: 14px;
+        color: #fff;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+      }
+      .stat-row {
+        display: flex;
+        justify-content: space-between;
+        font-size: 11px;
+        margin-bottom: 4px;
+        color: #aaa;
+      }
+      .val {
+        color: #ffd700;
+        font-weight: bold;
+        font-family: "Consolas", monospace;
+      }
+      .seq {
+        word-break: break-all;
+        font-size: 9px;
+        color: #555;
+        margin-top: 10px;
+      }
+
+      #controls {
+        position: absolute;
+        bottom: 30px;
+        left: 50%;
+        transform: translateX(-50%);
+        display: flex;
+        gap: 15px;
+        z-index: 10;
+      }
+
+      button {
+        background: rgba(10, 10, 10, 0.9);
+        color: #eee;
+        border: 1px solid #444;
+        padding: 12px 24px;
+        font-family: "Courier New", monospace;
+        font-size: 12px;
+        font-weight: bold;
+        cursor: pointer;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        transition: all 0.2s ease;
+        backdrop-filter: blur(4px);
+      }
+
+      button:hover {
+        background: #222;
+        border-color: #ffd700;
+        color: #ffd700;
+        box-shadow: 0 0 15px rgba(255, 215, 0, 0.3);
+        transform: translateY(-2px);
+      }
+
+      button:active {
+        transform: translateY(1px);
+      }
+
+      #speed-control {
+        position: absolute;
+        bottom: 80px;
+        left: 50%;
+        transform: translateX(-50%);
+        color: #555;
+        font-size: 10px;
+        text-align: center;
+      }
+
+      #signature {
+        position: absolute;
+        bottom: 10px;
+        right: 20px;
+        color: #333;
+        font-size: 10px;
+        opacity: 0.5;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="hud">
+      <h1>LightFold Kernel v1.4</h1>
+      <div class="stat-row">
+        <span>ALGORITHM</span> <span class="val">Vector Field</span>
+      </div>
+      <div class="stat-row">
+        <span>PHYSICS</span>
+        <span class="val" style="color: #0f0">Cinematic/ZeroAlloc</span>
+      </div>
+      <hr style="border: 0; border-top: 1px solid #333; margin: 8px 0" />
+      <div class="stat-row">
+        <span>PHYS_STEPS</span> <span id="iter-display" class="val">0</span>
+      </div>
+      <div class="stat-row">
+        <span>HH POTENTIAL</span>
+        <span id="energy-display" class="val">0.00</span>
+      </div>
+      <div class="stat-row">
+        <span>BOND ERR (MAX)</span>
+        <span id="bond-err-display" class="val">0.000</span>
+      </div>
+      <div class="stat-row">
+        <span>MIN NONBOND</span>
+        <span id="min-dist-display" class="val">0.00</span>
+      </div>
+      <div class="stat-row">
+        <span>HH CONTACTS</span>
+        <span id="contacts-display" class="val">0</span>
+      </div>
+      <div class="stat-row">
+        <span>STATUS</span>
+        <span id="status-display" style="color: lime">READY</span>
+      </div>
+      <div class="seq" id="seq-display"></div>
+    </div>
+
+    <div id="speed-control">[1] Slow &nbsp; [2] Mid &nbsp; [3] Full</div>
+
+    <div id="controls">
+      <button id="btn-run">INITIATE (Space)</button>
+      <button id="btn-reset">RESET (R)</button>
+    </div>
+
+    <div id="signature">ARCHITECT: JEAN // OPTIMIZATION: 00003</div>
+    <div id="canvas-container"></div>
+
+    <!-- THREE.JS -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+    <script>
+      // --- 0. CONFIGURATION & CONSTANTS ---
+      // const SEQUENCE = "HPHHPPHPHHPHPHHPPHPHHPHPHHPPHPHHPHPHPHHPHPHHPHPH";
+      // const SEQUENCE = "PPPHHPPHHPPHHPPHHPPHHPPHHPPHHPPHHPPHHPPHHPPHHPPHHPPHH";
+      const SEQUENCE = "HHHHPPPPHHHHPPPPHHHHPPPPHHHHPPPPHHHHPPPPHH";
+      document.getElementById("seq-display").innerText = SEQUENCE;
+
+      const BOND_LENGTH = 1.0;
+      const CENTROID_STRENGTH = 1.0;
+      const REPULSION_STRENGTH = 2.0;
+      const STERIC_RADIUS_SQ = 1.2 * 1.2;
+      const SPRING_CONST = 60.0;
+
+      // Physics Tuning
+      const SUBSTEPS = 5;
+      const TIME_STEP_MS = 1000 / 60; // 16.666... ms fixed tick
+      const DT = TIME_STEP_MS / 1000 / SUBSTEPS; // Exact match
+      const MAX_FORCE = 10.0;
+      const CONVERGENCE_LIMIT = 2500 * SUBSTEPS;
+
+      // --- CINEMA CONFIG (v1.4) ---
+      // Prevent multi-tick catch-up (no teleporting)
+      const MAX_TICKS_PER_FRAME = 1;
+
+      // Cinematic Slow Start
+      const SLOWMO_START = 0.15; // Start at 15% speed
+      const SLOWMO_RAMP_STEPS = 3000; // Ramp up over first 3000 ticks
+
+      let USER_SPEED = 1.0; // User override via keys [1,2,3]
+
+      // HUD Config
+      const HUD_UPDATE_MS = 100; // 10Hz Refresh
+
+      // --- 1. MEMORY MANAGEMENT ---
+      const _v1 = new THREE.Vector3();
+      const _diff = new THREE.Vector3();
+      const _centroid = new THREE.Vector3();
+
+      class Particle {
+        constructor(index, type) {
+          this.index = index;
+          this.type = type;
+          this.isH = type === "H";
+
+          const t = index * 0.5;
+          this.pos = new THREE.Vector3(
+            Math.cos(t) * index * 0.3,
+            Math.sin(t) * index * 0.3,
+            index * 0.3
+          );
+
+          this.vel = new THREE.Vector3(0, 0, 0);
+          this.force = new THREE.Vector3(0, 0, 0);
+          this.mesh = null;
+        }
+      }
+
+      // --- 2. SCENE SETUP ---
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x050505);
+      scene.fog = new THREE.FogExp2(0x050505, 0.03);
+
+      const camera = new THREE.PerspectiveCamera(
+        45,
+        window.innerWidth / window.innerHeight,
+        0.1,
+        100
+      );
+      camera.position.set(0, 15, 25);
+
+      const renderer = new THREE.WebGLRenderer({
+        antialias: true,
+        powerPreference: "high-performance",
+      });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      document
+        .getElementById("canvas-container")
+        .appendChild(renderer.domElement);
+
+      const controls = new THREE.OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+      controls.autoRotate = true;
+      controls.autoRotateSpeed = 0.5;
+
+      const ambLight = new THREE.AmbientLight(0x404040);
+      scene.add(ambLight);
+      const pLight1 = new THREE.PointLight(0xffffff, 0.8, 100);
+      pLight1.position.set(10, 10, 10);
+      scene.add(pLight1);
+      const pLight2 = new THREE.PointLight(0x00ffff, 0.5, 100);
+      pLight2.position.set(-10, -10, -10);
+      scene.add(pLight2);
+
+      const matH = new THREE.MeshPhongMaterial({
+        color: 0xffd700,
+        emissive: 0xaa6600,
+        emissiveIntensity: 0.6,
+        shininess: 100,
+      });
+      const matP = new THREE.MeshPhongMaterial({
+        color: 0x00ffff,
+        emissive: 0x002222,
+        emissiveIntensity: 0.3,
+        shininess: 50,
+        transparent: true,
+        opacity: 0.7,
+      });
+      const geoSphere = new THREE.SphereGeometry(0.35, 16, 16);
+
+      const lineGeo = new THREE.BufferGeometry();
+      const positions = new Float32Array(SEQUENCE.length * 3);
+      lineGeo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+      const lineMat = new THREE.LineBasicMaterial({
+        color: 0x444444,
+        linewidth: 2,
+      });
+      const backboneLine = new THREE.Line(lineGeo, lineMat);
+      scene.add(backboneLine);
+
+      // --- 3. STATE & LOGIC ---
+      const atoms = [];
+      const h_indices = [];
+      let running = false;
+      let simStep = 0;
+      let timeAccumulator = 0;
+      let lastTime = 0;
+
+      let lastHudUpdate = 0;
+      let lastMetrics = {
+        potential: 0,
+        maxBondErr: 0,
+        minNonBond: 0,
+        contacts: 0,
+      };
+
+      function initSimulation() {
+        atoms.forEach((a) => scene.remove(a.mesh));
+        atoms.length = 0;
+        h_indices.length = 0;
+        simStep = 0;
+        timeAccumulator = 0;
+        lastTime = performance.now();
+        lastHudUpdate = 0;
+
+        // Set camera focus to origin on reset
+        // controls.target.set(0,0,0);
+
+        for (let i = 0; i < SEQUENCE.length; i++) {
+          const type = SEQUENCE[i];
+          const atom = new Particle(i, type);
+          atoms.push(atom);
+          if (atom.isH) h_indices.push(i);
+
+          atom.mesh = new THREE.Mesh(geoSphere, atom.isH ? matH : matP);
+          scene.add(atom.mesh);
+        }
+
+        updateVisuals();
+        lastMetrics = calculateMetrics();
+        uiUpdate(lastMetrics, "READY");
+      }
+
+      function calculatePhysics() {
+        _centroid.set(0, 0, 0);
+        if (h_indices.length > 0) {
+          for (let i = 0; i < h_indices.length; i++) {
+            _centroid.add(atoms[h_indices[i]].pos);
+          }
+          _centroid.multiplyScalar(1.0 / h_indices.length);
+        }
+
+        for (let i = 0; i < atoms.length; i++) atoms[i].force.set(0, 0, 0);
+
+        for (let i = 0; i < atoms.length; i++) {
+          const p1 = atoms[i];
+          if (p1.isH) {
+            _v1.subVectors(_centroid, p1.pos).multiplyScalar(CENTROID_STRENGTH);
+            p1.force.add(_v1);
+          }
+
+          for (let j = i + 2; j < atoms.length; j++) {
+            const p2 = atoms[j];
+            _diff.subVectors(p1.pos, p2.pos);
+            const distSq = _diff.lengthSq();
+
+            if (distSq < STERIC_RADIUS_SQ && distSq > 1e-8) {
+              const invDist = 1.0 / Math.sqrt(distSq);
+              const forceMagnitude = REPULSION_STRENGTH / (distSq + 0.1);
+              const scale = forceMagnitude * invDist;
+
+              _v1.set(_diff.x * scale, _diff.y * scale, _diff.z * scale);
+              p1.force.add(_v1);
+              p2.force.sub(_v1);
+            }
+          }
+        }
+
+        for (let i = 0; i < atoms.length - 1; i++) {
+          const p1 = atoms[i];
+          const p2 = atoms[i + 1];
+          _diff.subVectors(p2.pos, p1.pos);
+          const distSq = _diff.lengthSq();
+
+          if (distSq > 1e-8) {
+            const invDist = 1.0 / Math.sqrt(distSq);
+            const dist = distSq * invDist;
+            const stretch = dist - BOND_LENGTH;
+
+            const scale = SPRING_CONST * stretch * invDist;
+            _v1.set(_diff.x * scale, _diff.y * scale, _diff.z * scale);
+
+            p1.force.add(_v1);
+            p2.force.sub(_v1);
+          }
+        }
+
+        for (let i = 0; i < atoms.length; i++) {
+          const p = atoms[i];
+          p.force.addScaledVector(p.vel, -0.1);
+          if (p.force.lengthSq() > MAX_FORCE * MAX_FORCE)
+            p.force.setLength(MAX_FORCE);
+          p.vel.addScaledVector(p.force, DT);
+          p.pos.addScaledVector(p.vel, DT);
+        }
+
+        for (let k = 0; k < 5; k++) {
+          for (let i = 0; i < atoms.length - 1; i++) {
+            const p1 = atoms[i];
+            const p2 = atoms[i + 1];
+            _diff.subVectors(p2.pos, p1.pos);
+            const distSq = _diff.lengthSq();
+            if (distSq < 1e-8) continue;
+            const dist = Math.sqrt(distSq);
+            const err = dist - BOND_LENGTH;
+            if (Math.abs(err) > 0.01) {
+              const scale = (err * 0.5) / dist;
+              _v1.copy(_diff).multiplyScalar(scale);
+              p1.pos.add(_v1);
+              p2.pos.sub(_v1);
+            }
+          }
+        }
+      }
+
+      function calculateMetrics() {
+        let energy = 0;
+        let contacts = 0;
+        for (let i = 0; i < h_indices.length; i++) {
+          const ai = atoms[h_indices[i]].pos;
+          for (let j = i + 1; j < h_indices.length; j++) {
+            const aj = atoms[h_indices[j]].pos;
+            const dx = ai.x - aj.x;
+            const dy = ai.y - aj.y;
+            const dz = ai.z - aj.z;
+            const dSq = dx * dx + dy * dy + dz * dz;
+            if (dSq < 6.25 && dSq > 1e-8) {
+              const d = Math.sqrt(dSq);
+              energy -= 10.0 / (d + 0.1);
+              if (d < 2.0) contacts++;
+            }
+          }
+        }
+        let maxBondErr = 0;
+        for (let i = 0; i < atoms.length - 1; i++) {
+          const a = atoms[i].pos;
+          const b = atoms[i + 1].pos;
+          const d = a.distanceTo(b);
+          const err = Math.abs(d - BOND_LENGTH);
+          if (err > maxBondErr) maxBondErr = err;
+        }
+        let minNonBondSq = Infinity;
+        for (let i = 0; i < atoms.length; i++) {
+          for (let j = i + 2; j < atoms.length; j++) {
+            const dSq = atoms[i].pos.distanceToSquared(atoms[j].pos);
+            if (dSq < minNonBondSq) minNonBondSq = dSq;
+          }
+        }
+        return {
+          potential: energy,
+          maxBondErr,
+          minNonBond: Math.sqrt(minNonBondSq),
+          contacts,
+        };
+      }
+
+      // --- 4. ANIMATION LOOP ---
+      function animate(now) {
+        requestAnimationFrame(animate);
+        controls.update();
+
+        const deltaTime = now - lastTime;
+        lastTime = now;
+
+        if (running && simStep < CONVERGENCE_LIMIT) {
+          // CINEMATIC RAMP (v1.4)
+          const ramp = Math.min(1, simStep / SLOWMO_RAMP_STEPS);
+          const timeScale =
+            (SLOWMO_START + (1 - SLOWMO_START) * ramp) * USER_SPEED;
+
+          timeAccumulator += Math.min(deltaTime, 100) * timeScale;
+
+          let ticksThisFrame = 0;
+          while (
+            timeAccumulator >= TIME_STEP_MS &&
+            ticksThisFrame < MAX_TICKS_PER_FRAME
+          ) {
+            for (let s = 0; s < SUBSTEPS; s++) {
+              calculatePhysics();
+              simStep++;
+              if (simStep >= CONVERGENCE_LIMIT) break;
+            }
+            timeAccumulator -= TIME_STEP_MS;
+            ticksThisFrame++;
+
+            if (simStep >= CONVERGENCE_LIMIT) {
+              running = false;
+              controls.autoRotateSpeed = 2.0;
+              break;
+            }
+          }
+
+          // Prevent spiraling backlog if render lags
+          timeAccumulator = Math.min(timeAccumulator, TIME_STEP_MS);
+
+          if (now - lastHudUpdate >= HUD_UPDATE_MS || !running) {
+            lastMetrics = calculateMetrics();
+            uiUpdate(lastMetrics, running ? "FOLDING..." : "CONVERGED");
+            lastHudUpdate = now;
+          }
+        }
+
+        updateVisuals();
+        renderer.render(scene, camera);
+      }
+
+      function updateVisuals() {
+        const positions = backboneLine.geometry.attributes.position.array;
+        for (let i = 0; i < atoms.length; i++) {
+          atoms[i].mesh.position.copy(atoms[i].pos);
+          positions[i * 3] = atoms[i].pos.x;
+          positions[i * 3 + 1] = atoms[i].pos.y;
+          positions[i * 3 + 2] = atoms[i].pos.z;
+        }
+        backboneLine.geometry.attributes.position.needsUpdate = true;
+      }
+
+      function uiUpdate(m, status) {
+        document.getElementById("energy-display").innerText =
+          m.potential.toFixed(2);
+        document.getElementById("bond-err-display").innerText =
+          m.maxBondErr.toFixed(3);
+        document.getElementById("min-dist-display").innerText =
+          m.minNonBond.toFixed(2);
+        document.getElementById("contacts-display").innerText = m.contacts;
+        document.getElementById("iter-display").innerText = simStep;
+
+        const statEl = document.getElementById("status-display");
+        statEl.innerText = status;
+
+        if (status === "CONVERGED") statEl.style.color = "lime";
+        else if (running) statEl.style.color = "yellow";
+        else statEl.style.color = "white";
+
+        const bondEl = document.getElementById("bond-err-display");
+        if (m.maxBondErr < 0.02) bondEl.style.color = "#0f0";
+        else if (m.maxBondErr < 0.08) bondEl.style.color = "#ffd700";
+        else bondEl.style.color = "#f00";
+      }
+
+      // --- HANDLERS ---
+      document.getElementById("btn-run").onclick = () => {
+        if (!running) {
+          if (simStep >= CONVERGENCE_LIMIT) initSimulation();
+          running = true;
+          lastTime = performance.now();
+          controls.autoRotate = false;
+        }
+      };
+
+      document.getElementById("btn-reset").onclick = () => {
+        running = false;
+        initSimulation();
+        controls.autoRotate = true;
+        controls.autoRotateSpeed = 0.5;
+      };
+
+      window.addEventListener("keydown", (e) => {
+        if (e.code === "Space") document.getElementById("btn-run").click();
+        if (e.code === "KeyR") document.getElementById("btn-reset").click();
+        if (e.code === "Digit1") USER_SPEED = 0.2; // Slow
+        if (e.code === "Digit2") USER_SPEED = 0.6; // Mid
+        if (e.code === "Digit3") USER_SPEED = 1.0; // Fast
+      });
+
+      window.addEventListener("resize", () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      });
+
+      // Start
+      initSimulation();
+      requestAnimationFrame(animate);
+    </script>
+  </body>
+</html>
